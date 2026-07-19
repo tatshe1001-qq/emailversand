@@ -19,15 +19,10 @@ st.title("📧 E-Mail Versand Tool für Lehrevaluationen")
 with st.expander("ℹ️ Anleitung & Verfügbare Variablen"):
     st.markdown("""
     **Anleitung:**
-    1. Laden Sie Ihre Excel-Datei (`.xlsx`) und die zugehörige ZIP-Datei hoch.
-    2. Konfigurieren Sie in der Seitenleiste Ihren SMTP-Server.
-    3. Der E-Mail-Text kann live bearbeitet werden. Nutzen Sie die Platzhalter:
-    
-    **Platzhalter:**
-    * `{anrede_de}`: Die originale Anrede aus Excel (z.B. "Sehr geehrte Frau Müller").
-    * `{anrede_en}`: Automatisch übersetzte Anrede (z.B. "Dear Ms. Müller").
-    * `{veranstaltungen_de}`: Deutsche Auflistung der Kurse.
-    * `{veranstaltungen_en}`: Englische Auflistung der Kurse.
+    1. Laden Sie Ihre Excel-Datei (`.xlsx`) hoch. Die Daten müssen in **'Tabelle1'** stehen.
+    2. Optional: Laden Sie eine ZIP-Datei mit Unterordnern (Nachnamen) hoch, falls Anhänge benötigt werden.
+    3. Konfigurieren Sie in der Seitenleiste Ihren SMTP-Server.
+    4. Der E-Mail-Text kann live bearbeitet werden.
     """)
 
 # Sidebar - SMTP Konfiguration
@@ -41,7 +36,7 @@ smtp_password = st.sidebar.text_input("Passwort", type="password")
 # Upload Bereich
 col1, col2 = st.columns(2)
 uploaded_excel = col1.file_uploader("Excel-Datei hochladen (.xlsx)", type=["xlsx"])
-uploaded_zip = col2.file_uploader("ZIP-Datei mit Unterordnern (.zip)", type=["zip"])
+uploaded_zip = col2.file_uploader("ZIP-Datei mit Unterordnern (optional)", type=["zip"])
 
 # Editor
 email_body_template = st.text_area("E-Mail Text bearbeiten", height=400, value="""{anrede_de},
@@ -74,17 +69,18 @@ Tatjana Shevchik""")
 
 # Versand-Logik
 if st.button("🚀 E-Mails versenden"):
-    if not (uploaded_excel and uploaded_zip and sender_email and smtp_password):
-        st.error("Bitte laden Sie alle Dateien hoch und füllen Sie die SMTP-Einstellungen aus.")
+    if not (uploaded_excel and sender_email and smtp_password):
+        st.error("Bitte laden Sie die Excel-Datei hoch und füllen Sie die SMTP-Einstellungen aus.")
     else:
         with st.spinner("Verarbeite Daten und versende E-Mails..."):
             with tempfile.TemporaryDirectory() as tmpdir:
-                # Zip entpacken
-                with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
-                    zip_ref.extractall(tmpdir)
+                # Zip entpacken, falls vorhanden
+                if uploaded_zip:
+                    with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
+                        zip_ref.extractall(tmpdir)
                 
-                # Excel laden
-                df = pd.read_excel(uploaded_excel, engine="openpyxl")
+                # Excel laden (Immer Tabelle1)
+                df = pd.read_excel(uploaded_excel, sheet_name="Tabelle1", engine="openpyxl")
                 df.columns = df.columns.str.strip()
                 df['LVEName_Kennung_Kombiniert'] = df['LVEName'].astype(str) + " " + df['Kennung'].astype(str)
                 grouped = df.groupby(['Emailempfänger', 'Anrede', 'Nachname'])
@@ -97,7 +93,7 @@ if st.button("🚀 E-Mails versenden"):
                 for (email, anrede_excel, nachname), group in grouped:
                     veranstaltungen = group['LVEName_Kennung_Kombiniert'].dropna().unique().tolist()
                     
-                    # Anrede-Übersetzung (Spezial-Logik für "Sehr geehrte" / "Guten Tag")
+                    # Anrede-Übersetzung
                     anrede_en_basis = anrede_excel.strip()
                     replacements = {
                         "Sehr geehrte Frau Professorin": "Dear Prof.",
@@ -116,13 +112,8 @@ if st.button("🚀 E-Mails versenden"):
                         anrede_en_basis = anrede_en_basis.replace(deutsch, englisch)
                     
                     # Kurs-Text Generierung
-                    if len(veranstaltungen) == 1:
-                        v_de = f'Ihrer Veranstaltung "{veranstaltungen[0]}"'
-                        v_en = f'your course "{veranstaltungen[0]}"'
-                    else:
-                        liste_v = "\n".join([f'- "{v}"' for v in veranstaltungen])
-                        v_de = f"Ihrer folgenden Veranstaltungen:\n\n{liste_v}"
-                        v_en = f"your following courses:\n\n{liste_v}"
+                    liste_v = "\n".join([f'- "{v}"' for v in veranstaltungen])
+                    v_en = f"your following courses:\n\n{liste_v}"
                     
                     # E-Mail Bau
                     msg = MIMEMultipart()
@@ -133,21 +124,21 @@ if st.button("🚀 E-Mails versenden"):
                     body = email_body_template.format(
                         anrede_de=f"{anrede_excel.strip()}",
                         anrede_en=f"{anrede_en_basis}",
-                        veranstaltungen_de=v_de,
                         veranstaltungen_en=v_en
                     )
                     msg.attach(MIMEText(body, 'plain', 'utf-8'))
                     
-                    # Anhang finden und zippen
-                    target_folder_path = os.path.join(tmpdir, str(nachname).strip())
-                    if os.path.isdir(target_folder_path):
-                        zip_file = shutil.make_archive(target_folder_path, 'zip', target_folder_path)
-                        with open(zip_file, "rb") as f:
-                            part = MIMEBase("application", "octet-stream")
-                            part.set_payload(f.read())
-                            encoders.encode_base64(part)
-                            part.add_header("Content-Disposition", f"attachment; filename={nachname}.zip")
-                            msg.attach(part)
+                    # Anhang finden und zippen, falls ZIP hochgeladen wurde
+                    if uploaded_zip:
+                        target_folder_path = os.path.join(tmpdir, str(nachname).strip())
+                        if os.path.isdir(target_folder_path):
+                            zip_file = shutil.make_archive(target_folder_path, 'zip', target_folder_path)
+                            with open(zip_file, "rb") as f:
+                                part = MIMEBase("application", "octet-stream")
+                                part.set_payload(f.read())
+                                encoders.encode_base64(part)
+                                part.add_header("Content-Disposition", f"attachment; filename={nachname}.zip")
+                                msg.attach(part)
                     
                     server.sendmail(sender_email, [email, bcc_email], msg.as_string())
                 
