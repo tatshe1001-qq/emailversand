@@ -15,14 +15,20 @@ from email.header import Header
 st.set_page_config(page_title="Lehrevaluations-Tool", layout="wide")
 st.title("📧 E-Mail Versand Tool für Lehrevaluationen")
 
-# ℹ️ Anleitung & Variablen-Übersicht
+# ℹ️ Anleitung & Verfügbare Variablen
 with st.expander("ℹ️ Anleitung & Verfügbare Variablen"):
     st.markdown("""
     **Anleitung:**
     1. Laden Sie Ihre Excel-Datei (`.xlsx`) hoch. Die Daten müssen in **'Tabelle1'** stehen.
-    2. Optional: Laden Sie eine ZIP-Datei mit Unterordnern (Nachnamen) hoch, falls Anhänge benötigt werden.
+    2. Optional: Laden Sie eine ZIP-Datei mit Unterordnern hoch.
     3. Konfigurieren Sie in der Seitenleiste Ihren SMTP-Server.
-    4. Der E-Mail-Text kann live bearbeitet werden.
+    4. **Wichtig:** Nutzen Sie im E-Mail-Text genau diese Platzhalter:
+    
+    **Platzhalter:**
+    * `{anrede_de}`: Die originale Anrede aus Excel.
+    * `{anrede_en}`: Automatisch übersetzte Anrede.
+    * `{veranstaltungen_de}`: Deutsche Kurs-Auflistung.
+    * `{veranstaltungen_en}`: Englische Kurs-Auflistung.
     """)
 
 # Sidebar - SMTP Konfiguration
@@ -41,15 +47,11 @@ uploaded_zip = col2.file_uploader("ZIP-Datei mit Unterordnern (optional)", type=
 # Editor
 email_body_template = st.text_area("E-Mail Text bearbeiten", height=400, value="""{anrede_de},
 
-Wir möchten Sie heute freundlich daran erinnern, dass die Lehrevaluation {veranstaltungen_de} noch aussteht. 
+bitte ignorieren Sie meine letzte E-Mail. Diese wurde versehentlich versendet. Vielen Dank!
 
-Die Unterlagen zur Evaluation sollten Sie bereits erhalten haben, aber wir haben diese nochmal hier angehängt. Bitte senden Sie uns dazu auch noch den ausgefüllten Rücklaufbogen zu.
+Mit freundlichen Grüßen
 
-Laden Sie dazu die ZIP-Datei vollständig herunter, entpacken diese und öffnen Sie die enthaltene HTML-Datei lokal (nicht aus einer Vorschau).
-
-Vielen Dank für Ihre Mühe!
-
-Mit den besten Grüßen
+Tatjana Shevchik
 
 ---
 
@@ -74,18 +76,15 @@ if st.button("🚀 E-Mails versenden"):
     else:
         with st.spinner("Verarbeite Daten und versende E-Mails..."):
             with tempfile.TemporaryDirectory() as tmpdir:
-                # Zip entpacken, falls vorhanden
                 if uploaded_zip:
                     with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
                         zip_ref.extractall(tmpdir)
                 
-                # Excel laden (Immer Tabelle1)
                 df = pd.read_excel(uploaded_excel, sheet_name="Tabelle1", engine="openpyxl")
                 df.columns = df.columns.str.strip()
                 df['LVEName_Kennung_Kombiniert'] = df['LVEName'].astype(str) + " " + df['Kennung'].astype(str)
                 grouped = df.groupby(['Emailempfänger', 'Anrede', 'Nachname'])
                 
-                # Server Login
                 server = smtplib.SMTP(smtp_server, smtp_port)
                 server.starttls()
                 server.login(sender_email, smtp_password)
@@ -93,7 +92,6 @@ if st.button("🚀 E-Mails versenden"):
                 for (email, anrede_excel, nachname), group in grouped:
                     veranstaltungen = group['LVEName_Kennung_Kombiniert'].dropna().unique().tolist()
                     
-                    # Anrede-Übersetzung
                     anrede_en_basis = anrede_excel.strip()
                     replacements = {
                         "Sehr geehrte Frau Professorin": "Dear Prof.",
@@ -111,24 +109,24 @@ if st.button("🚀 E-Mails versenden"):
                     for deutsch, englisch in replacements.items():
                         anrede_en_basis = anrede_en_basis.replace(deutsch, englisch)
                     
-                    # Kurs-Text Generierung
                     liste_v = "\n".join([f'- "{v}"' for v in veranstaltungen])
+                    v_de = f"Ihrer folgenden Veranstaltungen:\n\n{liste_v}"
                     v_en = f"your following courses:\n\n{liste_v}"
                     
-                    # E-Mail Bau
                     msg = MIMEMultipart()
                     msg['From'] = sender_email
                     msg['To'] = email
                     msg['Subject'] = Header(f"Erinnerung: Lehrevaluation ({nachname})", 'utf-8').encode()
                     
+                    # Hier sind nun alle 4 Platzhalter korrekt definiert
                     body = email_body_template.format(
                         anrede_de=f"{anrede_excel.strip()}",
                         anrede_en=f"{anrede_en_basis}",
+                        veranstaltungen_de=v_de,
                         veranstaltungen_en=v_en
                     )
                     msg.attach(MIMEText(body, 'plain', 'utf-8'))
                     
-                    # Anhang finden und zippen, falls ZIP hochgeladen wurde
                     if uploaded_zip:
                         target_folder_path = os.path.join(tmpdir, str(nachname).strip())
                         if os.path.isdir(target_folder_path):
