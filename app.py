@@ -33,19 +33,31 @@ with st.expander("ℹ️ Anleitung & Verfügbare Variablen"):
 
 # Sidebar - SMTP Konfiguration
 st.sidebar.header("SMTP Konfiguration")
+
 sender_email = st.sidebar.text_input("Absender E-Mail")
-bcc_email = st.sidebar.text_input("BCC E-Mail", sender_email)
+bcc_email = st.sidebar.text_input("BCC E-Mail (optional)")
 smtp_server = st.sidebar.text_input("SMTP Server", "mail.uni-ulm.de")
 smtp_port = st.sidebar.number_input("Port", value=587)
 smtp_password = st.sidebar.text_input("Passwort", type="password")
 
 # Upload Bereich
 col1, col2 = st.columns(2)
-uploaded_excel = col1.file_uploader("Excel-Datei hochladen (.xlsx)", type=["xlsx"])
-uploaded_zip = col2.file_uploader("ZIP-Datei mit Unterordnern (optional)", type=["zip"])
+
+uploaded_excel = col1.file_uploader(
+    "Excel-Datei hochladen (.xlsx)",
+    type=["xlsx"]
+)
+
+uploaded_zip = col2.file_uploader(
+    "ZIP-Datei mit Unterordnern (optional)",
+    type=["zip"]
+)
 
 # Editor
-email_body_template = st.text_area("E-Mail Text bearbeiten", height=400, value="""{anrede_de},
+email_body_template = st.text_area(
+    "E-Mail Text bearbeiten",
+    height=400,
+    value="""{anrede_de},
 
 bitte ignorieren Sie meine letzte E-Mail. Diese wurde versehentlich versendet. Vielen Dank!
 
@@ -67,32 +79,74 @@ Thank you very much for your effort!
 
 Best regards,
 
-Tatjana Shevchik""")
+Tatjana Shevchik"""
+)
+
 
 # Versand-Logik
 if st.button("🚀 E-Mails versenden"):
+
     if not (uploaded_excel and sender_email and smtp_password):
-        st.error("Bitte laden Sie die Excel-Datei hoch und füllen Sie die SMTP-Einstellungen aus.")
+        st.error(
+            "Bitte laden Sie die Excel-Datei hoch und füllen Sie die SMTP-Einstellungen aus."
+        )
+
     else:
+
         with st.spinner("Verarbeite Daten und versende E-Mails..."):
+
             with tempfile.TemporaryDirectory() as tmpdir:
+
+                # ZIP entpacken
                 if uploaded_zip:
                     with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
                         zip_ref.extractall(tmpdir)
-                
-                df = pd.read_excel(uploaded_excel, sheet_name="Tabelle1", engine="openpyxl")
+
+                # Excel laden
+                df = pd.read_excel(
+                    uploaded_excel,
+                    sheet_name="Tabelle1",
+                    engine="openpyxl"
+                )
+
                 df.columns = df.columns.str.strip()
-                df['LVEName_Kennung_Kombiniert'] = df['LVEName'].astype(str) + " " + df['Kennung'].astype(str)
-                grouped = df.groupby(['Emailempfänger', 'Anrede', 'Nachname'])
-                
-                server = smtplib.SMTP(smtp_server, smtp_port)
+
+                df['LVEName_Kennung_Kombiniert'] = (
+                    df['LVEName'].astype(str)
+                    + " "
+                    + df['Kennung'].astype(str)
+                )
+
+                grouped = df.groupby(
+                    ['Emailempfänger', 'Anrede', 'Nachname']
+                )
+
+                # SMTP Verbindung
+                server = smtplib.SMTP(
+                    smtp_server,
+                    smtp_port
+                )
+
                 server.starttls()
-                server.login(sender_email, smtp_password)
-                
+                server.login(
+                    sender_email,
+                    smtp_password
+                )
+
+
                 for (email, anrede_excel, nachname), group in grouped:
-                    veranstaltungen = group['LVEName_Kennung_Kombiniert'].dropna().unique().tolist()
-                    
+
+                    veranstaltungen = (
+                        group['LVEName_Kennung_Kombiniert']
+                        .dropna()
+                        .unique()
+                        .tolist()
+                    )
+
+
+                    # Übersetzung Anrede
                     anrede_en_basis = anrede_excel.strip()
+
                     replacements = {
                         "Sehr geehrte Frau Professorin": "Dear Prof.",
                         "Sehr geehrter Herr Professor": "Dear Prof.",
@@ -106,50 +160,125 @@ if st.button("🚀 E-Mails versenden"):
                         "Guten Tag Herr": "Dear Mr.",
                         "Guten Tag": "Dear"
                     }
+
                     for deutsch, englisch in replacements.items():
-                        anrede_en_basis = anrede_en_basis.replace(deutsch, englisch)
-                    
-                    liste_v = "\n".join([f'- "{v}"' for v in veranstaltungen])
-                    v_de = f"Ihrer folgenden Veranstaltungen:\n\n{liste_v}"
-                    v_en = f"your following courses:\n\n{liste_v}"
-                    
-                    # --- ALLES AB HIER MUSS IN DIESER EINRÜCKUNG SEIN ---
-                    # E-Mail Bau
+                        anrede_en_basis = (
+                            anrede_en_basis.replace(
+                                deutsch,
+                                englisch
+                            )
+                        )
+
+
+                    liste_v = "\n".join(
+                        [f'- "{v}"' for v in veranstaltungen]
+                    )
+
+                    v_de = (
+                        f"Ihrer folgenden Veranstaltungen:\n\n"
+                        f"{liste_v}"
+                    )
+
+                    v_en = (
+                        f"your following courses:\n\n"
+                        f"{liste_v}"
+                    )
+
+
+                    # E-Mail erstellen
                     msg = MIMEMultipart()
+
                     msg['From'] = sender_email
                     msg['To'] = email
-                    if bcc_email:
-                        msg['Bcc'] = bcc_email 
-                    msg['Subject'] = Header(f"Erinnerung: Lehrevaluation ({nachname})", 'utf-8').encode()
-                    
+
+                    # KEIN msg['Bcc'] !!!
+                    # BCC wird nur über sendmail() übergeben
+
+                    msg['Subject'] = Header(
+                        f"Erinnerung: Lehrevaluation ({nachname})",
+                        'utf-8'
+                    ).encode()
+
+
                     body = email_body_template.format(
-                        anrede_de=f"{anrede_excel.strip()}",
-                        anrede_en=f"{anrede_en_basis}",
+                        anrede_de=anrede_excel.strip(),
+                        anrede_en=anrede_en_basis,
                         veranstaltungen_de=v_de,
                         veranstaltungen_en=v_en
                     )
-                    msg.attach(MIMEText(body, 'plain', 'utf-8'))
-                    
-                    # Anhang HINZUFÜGEN
-                    if uploaded_zip:
-                        target_folder_path = os.path.join(tmpdir, str(nachname).strip())
-                        if os.path.isdir(target_folder_path):
-                            zip_file = shutil.make_archive(target_folder_path, 'zip', target_folder_path)
-                            with open(zip_file, "rb") as f:
-                                part = MIMEBase("application", "octet-stream")
-                                part.set_payload(f.read())
-                                encoders.encode_base64(part)
-                                part.add_header("Content-Disposition", f"attachment; filename={nachname}.zip")
-                                msg.attach(part)
-                    
-                    # Senden
-                    empfaenger_liste = [email]
-                    if bcc_email and bcc_email != email:
-                        empfaenger_liste.append(bcc_email)
-                    
-                    server.sendmail(sender_email, empfaenger_liste, msg.as_string())
-                    # --- ENDE DER EINRÜCKUNG ---
 
-                # Erst NACH der Schleife den Server schließen
+                    msg.attach(
+                        MIMEText(
+                            body,
+                            'plain',
+                            'utf-8'
+                        )
+                    )
+
+
+                    # ZIP-Anhang
+                    if uploaded_zip:
+
+                        target_folder_path = os.path.join(
+                            tmpdir,
+                            str(nachname).strip()
+                        )
+
+                        if os.path.isdir(target_folder_path):
+
+                            zip_file = shutil.make_archive(
+                                target_folder_path,
+                                'zip',
+                                target_folder_path
+                            )
+
+                            with open(zip_file, "rb") as f:
+
+                                part = MIMEBase(
+                                    "application",
+                                    "octet-stream"
+                                )
+
+                                part.set_payload(
+                                    f.read()
+                                )
+
+                                encoders.encode_base64(part)
+
+                                part.add_header(
+                                    "Content-Disposition",
+                                    f"attachment; filename={nachname}.zip"
+                                )
+
+                                msg.attach(part)
+
+
+                    # Empfänger inkl. BCC
+                    empfaenger_liste = [
+                        email
+                    ]
+
+                    if (
+                        bcc_email
+                        and bcc_email.strip()
+                        and bcc_email.strip() != email.strip()
+                    ):
+                        empfaenger_liste.append(
+                            bcc_email.strip()
+                        )
+
+
+                    # Versand
+                    server.sendmail(
+                        sender_email,
+                        empfaenger_liste,
+                        msg.as_string()
+                    )
+
+
+                # SMTP schließen
                 server.quit()
-                st.success("✅ Alle E-Mails wurden erfolgreich versandt!")
+
+                st.success(
+                    "✅ Alle E-Mails wurden erfolgreich versandt!"
+                )
