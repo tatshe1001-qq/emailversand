@@ -113,12 +113,15 @@ if st.button("🚀 E-Mails versenden"):
                     v_de = f"Ihrer folgenden Veranstaltungen:\n\n{liste_v}"
                     v_en = f"your following courses:\n\n{liste_v}"
                     
+                    # --- ALLES AB HIER MUSS IN DIESER EINRÜCKUNG SEIN ---
+                    # E-Mail Bau
                     msg = MIMEMultipart()
                     msg['From'] = sender_email
                     msg['To'] = email
+                    if bcc_email:
+                        msg['Bcc'] = bcc_email 
                     msg['Subject'] = Header(f"Erinnerung: Lehrevaluation ({nachname})", 'utf-8').encode()
                     
-                    # Hier sind nun alle 4 Platzhalter korrekt definiert
                     body = email_body_template.format(
                         anrede_de=f"{anrede_excel.strip()}",
                         anrede_en=f"{anrede_en_basis}",
@@ -127,6 +130,7 @@ if st.button("🚀 E-Mails versenden"):
                     )
                     msg.attach(MIMEText(body, 'plain', 'utf-8'))
                     
+                    # Anhang HINZUFÜGEN
                     if uploaded_zip:
                         target_folder_path = os.path.join(tmpdir, str(nachname).strip())
                         if os.path.isdir(target_folder_path):
@@ -138,7 +142,14 @@ if st.button("🚀 E-Mails versenden"):
                                 part.add_header("Content-Disposition", f"attachment; filename={nachname}.zip")
                                 msg.attach(part)
                     
-                    server.sendmail(sender_email, [email, bcc_email], msg.as_string())
-                
+                    # Senden
+                    empfaenger_liste = [email]
+                    if bcc_email and bcc_email != email:
+                        empfaenger_liste.append(bcc_email)
+                    
+                    server.sendmail(sender_email, empfaenger_liste, msg.as_string())
+                    # --- ENDE DER EINRÜCKUNG ---
+
+                # Erst NACH der Schleife den Server schließen
                 server.quit()
                 st.success("✅ Alle E-Mails wurden erfolgreich versandt!")
